@@ -87,7 +87,8 @@ async def process_questions_background(
             user_id=user_id,
             db=db,
             current_user=current_user,
-            session_id=session_id
+            session_id=session_id,
+            export_name=export_name
         )
         
         # Save export record

@@ -28,7 +28,8 @@ class ExcelExportService:
         user_id: int,
         db: Session,
         current_user,
-        session_id: Optional[int] = None
+        session_id: Optional[int] = None,
+        export_name: Optional[str] = None
     ) -> Tuple[str, int]:
         """Process questions and generate Excel file"""
         
@@ -98,10 +99,10 @@ class ExcelExportService:
                 })
         
         # Generate Excel file
-        filename = await self._generate_excel_file(results, user_id)
+        filename = await self._generate_excel_file(results, user_id, export_name)
         return filename, processed_count
     
-    async def _generate_excel_file(self, results: List[Dict], user_id: int) -> str:
+    async def _generate_excel_file(self, results: List[Dict], user_id: int, export_name: Optional[str] = None) -> str:
         """Generate Excel file from results"""
         
         # Create DataFrame
@@ -110,7 +111,16 @@ class ExcelExportService:
         # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_id = str(uuid.uuid4())[:8]
-        filename = f"qa_export_{user_id}_{timestamp}_{file_id}.xlsx"
+        
+        # Use custom export name if provided, otherwise use default pattern
+        if export_name and export_name.strip():
+            # Sanitize filename - remove invalid characters and limit length
+            sanitized_name = "".join(c for c in export_name.strip() if c.isalnum() or c in (' ', '-', '_')).strip()
+            sanitized_name = sanitized_name.replace(' ', '_')[:50]  # Limit length
+            filename = f"{sanitized_name}_{timestamp}_{file_id}.xlsx"
+        else:
+            filename = f"qa_export_{user_id}_{timestamp}_{file_id}.xlsx"
+            
         file_path = os.path.join(self.exports_dir, filename)
         
         try:
@@ -240,18 +250,23 @@ class ExcelExportService:
             'current_question': '',
             'status': 'processing',
             'start_time': datetime.now(),
-            'current_question_index': 0
+            'current_question_index': 0,
+            'progress_percentage': 0.0
         }
         return session_id
     
     def update_progress(self, session_id: int, current_question: str, current_index: int, processed_count: int):
         """Update progress for a processing session"""
         if session_id in _processing_progress:
+            total_questions = _processing_progress[session_id]['total_questions']
+            progress_percentage = (processed_count / total_questions) * 100 if total_questions > 0 else 0
+            
             _processing_progress[session_id].update({
                 'current_question': current_question,
                 'current_question_index': current_index,
                 'processed_questions': processed_count,
-                'status': 'processing'
+                'status': 'processing',
+                'progress_percentage': progress_percentage
             })
     
     def complete_processing_session(self, session_id: int):

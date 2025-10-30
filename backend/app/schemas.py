@@ -460,6 +460,7 @@ class QuestionAnswerResponse(BaseResponse):
     answers_generated: int = 0
     processing_time: Optional[float] = None
     export_file_url: Optional[str] = None
+    session_id: Optional[int] = None
 
 
 class QuestionAnswerExportSchema(BaseModel):

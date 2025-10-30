@@ -135,20 +135,23 @@ export default function QuestionExportPage() {
   };
 
   const startProgressPolling = (sessionId: number) => {
+    console.log('🚀 Starting progress polling for session:', sessionId);
     const interval = setInterval(async () => {
       try {
         const progress = await api.getProcessingProgress(sessionId);
+        console.log('📊 Progress data received:', progress);
         setProgressData(progress);
         
         // If processing is complete, stop polling and refresh exports
         if (progress.status === 'completed' || progress.status === 'failed') {
+          console.log('✅ Processing completed or failed, stopping polling');
           clearInterval(interval);
           setProgressInterval(null);
           setProgressData(null);
           loadExports();
         }
       } catch (error) {
-        console.error('Failed to fetch progress:', error);
+        console.error('❌ Failed to fetch progress:', error);
         // If progress endpoint fails, stop polling
         clearInterval(interval);
         setProgressInterval(null);
@@ -182,17 +185,22 @@ export default function QuestionExportPage() {
 
     setProcessing(true);
     try {
+      console.log('📤 Sending questions for processing:', validQuestions);
       const response = await api.processQuestionsAndExport({
         questions: validQuestions,
         document_ids: selectedDocuments.length > 0 ? selectedDocuments : undefined,
         export_name: exportName || undefined,
       });
 
+      console.log('📥 Response received:', response);
       message.success('Question processing started! Tracking progress...');
       
       // Start progress polling if session_id is available
       if (response.session_id) {
+        console.log('🎯 Session ID received:', response.session_id);
         startProgressPolling(response.session_id);
+      } else {
+        console.warn('⚠️ No session ID received from backend');
       }
       
       // Reset form
@@ -202,7 +210,7 @@ export default function QuestionExportPage() {
       form.resetFields();
 
     } catch (error) {
-      console.error('Failed to process questions:', error);
+      console.error('❌ Failed to process questions:', error);
       message.error('Failed to start question processing');
       stopProgressPolling();
     } finally {
