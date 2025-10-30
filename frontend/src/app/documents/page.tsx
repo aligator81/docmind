@@ -289,7 +289,13 @@ export default function DocumentsPage() {
       setDocuments(updatedDocuments);
     } catch (error) {
       console.error('Upload error:', error);
-      message.error(`Failed to upload ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Upload error details:', {
+        fileName: file.name,
+        error: errorMessage,
+        timestamp: new Date().toISOString()
+      });
+      message.error(`Failed to upload ${file.name}: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
@@ -338,8 +344,14 @@ export default function DocumentsPage() {
       const updatedDocuments = await api.getDocuments();
       setDocuments(updatedDocuments);
     } catch (error) {
-      message.error(`Failed to ${action} document`);
-      console.error(`${action} error:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`${action} error:`, {
+        documentId,
+        action,
+        error: errorMessage,
+        timestamp: new Date().toISOString()
+      });
+      message.error(`Failed to ${action} document: ${errorMessage}`);
     }
   };
 
@@ -353,43 +365,58 @@ export default function DocumentsPage() {
         progress: 0,
       });
 
-      // Start the complete processing pipeline
-      const result = await api.processDocumentComplete(documentId);
+      // Start the complete processing pipeline (non-blocking)
+      api.processDocumentComplete(documentId).then(result => {
+        if (result.success) {
+          // Final update when processing is complete
+          setProcessingProgress({
+            documentId,
+            isProcessing: false,
+            currentStage: 'complete',
+            progress: 100,
+            chunksCreated: result.metadata?.chunks_created,
+            embeddingsCreated: result.metadata?.embeddings_created,
+            processingTime: result.processing_time,
+          });
 
-      if (result.success) {
-        // Update progress to complete
-        setProcessingProgress({
-          documentId,
-          isProcessing: false,
-          currentStage: 'complete',
-          progress: 100,
-          chunksCreated: result.metadata?.chunks_created,
-          embeddingsCreated: result.metadata?.embeddings_created,
-          processingTime: result.processing_time,
-        });
+          // Show completion notification
+          setCompletionStats({
+            chunksCreated: result.metadata?.chunks_created || 0,
+            embeddingsCreated: result.metadata?.embeddings_created || 0,
+            processingTime: result.processing_time || 0,
+          });
+          setCompletionModalVisible(true);
 
-        // Show completion notification
-        setCompletionStats({
-          chunksCreated: result.metadata?.chunks_created || 0,
-          embeddingsCreated: result.metadata?.embeddings_created || 0,
-          processingTime: result.processing_time || 0,
-        });
-        setCompletionModalVisible(true);
-
-        message.success('Document processed successfully!');
-        
-        // Refresh documents list
-        const updatedDocuments = await api.getDocuments();
-        setDocuments(updatedDocuments);
-      } else {
+          message.success('Document processed successfully!');
+          
+          // Refresh documents list
+          loadData();
+        } else {
+          setProcessingProgress({
+            documentId: null,
+            isProcessing: false,
+            currentStage: null,
+            progress: 0,
+          });
+          message.error('Document processing failed');
+        }
+      }).catch(error => {
         setProcessingProgress({
           documentId: null,
           isProcessing: false,
           currentStage: null,
           progress: 0,
         });
-        message.error('Document processing failed');
-      }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Process document error:', {
+          documentId,
+          error: errorMessage,
+          timestamp: new Date().toISOString()
+        });
+        message.error(`Failed to process document: ${errorMessage}`);
+      });
+
+      
     } catch (error) {
       setProcessingProgress({
         documentId: null,
@@ -397,48 +424,100 @@ export default function DocumentsPage() {
         currentStage: null,
         progress: 0,
       });
-      message.error('Failed to process document');
-      console.error('Process document error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Process document error:', {
+        documentId,
+        error: errorMessage,
+        timestamp: new Date().toISOString()
+      });
+      message.error(`Failed to start document processing: ${errorMessage}`);
     }
   };
 
-  // Simulate progress updates (in real implementation, this would come from WebSocket or polling)
-  useEffect(() => {
-    if (processingProgress.isProcessing && processingProgress.currentStage) {
-      const interval = setInterval(() => {
-        setProcessingProgress(prev => {
-          if (!prev.isProcessing) return prev;
-          
-          let newProgress = prev.progress;
-          let newStage = prev.currentStage;
-          
-          // Simulate progress through stages
-          if (prev.currentStage === 'extract' && prev.progress < 33) {
-            newProgress = Math.min(33, prev.progress + 5);
-          } else if (prev.currentStage === 'extract' && prev.progress >= 33) {
-            newStage = 'chunk';
-            newProgress = 33;
-          } else if (prev.currentStage === 'chunk' && prev.progress < 66) {
-            newProgress = Math.min(66, prev.progress + 5);
-          } else if (prev.currentStage === 'chunk' && prev.progress >= 66) {
-            newStage = 'embed';
-            newProgress = 66;
-          } else if (prev.currentStage === 'embed' && prev.progress < 100) {
-            newProgress = Math.min(100, prev.progress + 5);
-          }
-          
-          return {
-            ...prev,
-            currentStage: newStage,
-            progress: newProgress,
-          };
+  const startProgressPolling = (documentId: number) => {
+    let pollInterval: NodeJS.Timeout | null = null;
+    
+    pollInterval = setInterval(async () => {
+      try {
+        const status = await api.getProcessingStatus(documentId);
+        
+        // Update progress based on actual processing status
+        let currentStage: 'extract' | 'chunk' | 'embed' | 'complete' | null = null;
+        let progress = 0;
+
+        switch (status.status) {
+          case 'not processed':
+            currentStage = 'extract';
+            progress = 10;
+            break;
+          case 'extracted':
+            currentStage = 'chunk';
+            progress = 40;
+            break;
+          case 'chunked':
+            currentStage = 'embed';
+            progress = 70;
+            break;
+          case 'processed':
+            currentStage = 'complete';
+            progress = 100;
+            break;
+          case 'processing':
+            // If processing, maintain current stage but show activity
+            currentStage = processingProgress.currentStage || 'extract';
+            progress = processingProgress.progress;
+            break;
+          case 'failed':
+            currentStage = null;
+            progress = 0;
+            message.error('Document processing failed');
+            if (pollInterval) clearInterval(pollInterval);
+            break;
+        }
+
+        setProcessingProgress(prev => ({
+          ...prev,
+          currentStage,
+          progress,
+          chunksCreated: status.chunks_count,
+          embeddingsCreated: status.embeddings_count,
+        }));
+
+        // Stop polling if processing is complete or failed
+        if (status.status === 'processed' || status.status === 'failed') {
+          if (pollInterval) clearInterval(pollInterval);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Error polling processing status:', {
+          documentId,
+          error: errorMessage,
+          timestamp: new Date().toISOString()
         });
-      }, 1000);
+        // Continue polling even if there's an error
+      }
+    }, 2000); // Poll every 2 seconds
 
-      return () => clearInterval(interval);
+    // Return cleanup function
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  };
+
+
+
+  // Cleanup polling when component unmounts or processing stops
+  useEffect(() => {
+    let cleanupPolling: (() => void) | null = null;
+    
+    if (processingProgress.isProcessing && processingProgress.documentId) {
+      cleanupPolling = startProgressPolling(processingProgress.documentId);
     }
-  }, [processingProgress.isProcessing, processingProgress.currentStage]);
 
+    return () => {
+      if (cleanupPolling) cleanupPolling();
+    };
+  }, [processingProgress.isProcessing, processingProgress.documentId]);
 
   const handleBulkAction = async (action: 'extract' | 'chunk' | 'embed' | 'delete') => {
     if (selectedRowKeys.length === 0) {
@@ -472,8 +551,14 @@ export default function DocumentsPage() {
       const updatedDocuments = await api.getDocuments();
       setDocuments(updatedDocuments);
     } catch (error) {
-      message.error(`Failed to ${action} selected documents`);
-      console.error(`Bulk ${action} error:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`Bulk ${action} error:`, {
+        documentIds,
+        action,
+        error: errorMessage,
+        timestamp: new Date().toISOString()
+      });
+      message.error(`Failed to ${action} selected documents: ${errorMessage}`);
     } finally {
       setProcessingStates(prev => ({ ...prev, [`bulk${action.charAt(0).toUpperCase() + action.slice(1)}`]: false }));
     }

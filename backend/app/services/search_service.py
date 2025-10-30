@@ -5,6 +5,8 @@ from datetime import datetime
 import logging
 
 from ..models import Document, DocumentChunk, Embedding, User
+from ..schemas import HybridSearchRequest
+from .hybrid_search_service import create_hybrid_search_service
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,50 @@ class AdvancedSearch:
     def search_documents(self, query: str = None, filters: Dict = None, user_id: int = None, user_role: str = "user") -> Dict:
         """Advanced document search with filters and pagination"""
         try:
+            # Check if semantic search is requested
+            use_semantic_search = filters and filters.get('semantic_search', False) if filters else False
+            
+            if use_semantic_search and query and query.strip():
+                # Use hybrid semantic search for content
+                semantic_results = self.hybrid_content_search(
+                    query=query,
+                    user_id=user_id,
+                    user_role=user_role,
+                    limit=filters.get('per_page', 20) if filters else 20,
+                    vector_weight=filters.get('vector_weight', 0.7) if filters else 0.7,
+                    text_weight=filters.get('text_weight', 0.3) if filters else 0.3,
+                    similarity_threshold=filters.get('similarity_threshold', 0.5) if filters else 0.5
+                )
+                
+                if semantic_results["success"]:
+                    # Convert hybrid search results to document format
+                    document_ids = set()
+                    documents = []
+                    
+                    for result in semantic_results["results"]:
+                        doc_id = result["document_id"]
+                        if doc_id not in document_ids:
+                            document = self.db.query(Document).filter(Document.id == doc_id).first()
+                            if document:
+                                documents.append(document)
+                                document_ids.add(doc_id)
+                    
+                    return {
+                        "success": True,
+                        "documents": documents,
+                        "total_count": semantic_results["total_count"],
+                        "page": filters.get('page', 1) if filters else 1,
+                        "per_page": filters.get('per_page', 20) if filters else 20,
+                        "total_pages": (semantic_results["total_count"] + (filters.get('per_page', 20) if filters else 20) - 1) // (filters.get('per_page', 20) if filters else 20),
+                        "has_next": False,  # Simplified for semantic search
+                        "has_prev": False,  # Simplified for semantic search
+                        "search_metadata": semantic_results.get("search_metadata", {}),
+                        "response_time_ms": semantic_results.get("response_time_ms", 0)
+                    }
+                else:
+                    # Fall back to regular search if semantic search fails
+                    logger.warning(f"Semantic search failed, falling back to regular search: {semantic_results.get('error')}")
+
             # Start with base query
             base_query = self.db.query(Document)
 
@@ -137,6 +183,15 @@ class AdvancedSearch:
     def search_similar_documents(self, document_id: int, limit: int = 10) -> Dict:
         """Find similar documents using embeddings"""
         try:
+            # Get the source document
+            source_document = self.db.query(Document).filter(Document.id == document_id).first()
+            if not source_document:
+                return {
+                    "success": False,
+                    "error": "Source document not found",
+                    "similar_documents": []
+                }
+
             # Get embeddings for the source document
             source_embeddings = self.db.query(Embedding).join(
                 DocumentChunk, Embedding.chunk_id == DocumentChunk.id
@@ -151,12 +206,68 @@ class AdvancedSearch:
                     "similar_documents": []
                 }
 
-            # This is a simplified similarity search
-            # In a production system, you would use vector similarity (cosine similarity, etc.)
-            similar_docs = []
+            # Use hybrid search to find similar documents based on content
+            # Extract key terms from the document for similarity search
+            search_query = source_document.original_filename or source_document.filename
+            if source_document.content:
+                # Use first 50 words as search query
+                words = source_document.content.split()[:50]
+                search_query = " ".join(words)
 
-            # For now, return recently processed documents as "similar"
-            # TODO: Implement proper vector similarity search
+            if not search_query:
+                # Fallback to basic similarity
+                return self._fallback_similarity_search(document_id, limit)
+
+            # Use hybrid search with high vector weight for semantic similarity
+            hybrid_service = create_hybrid_search_service(self.db)
+            search_request = HybridSearchRequest(
+                query=search_query,
+                limit=limit * 2,  # Get more for filtering
+                vector_weight=0.9,  # High vector weight for semantic similarity
+                text_weight=0.1,
+                similarity_threshold=0.6,  # Higher threshold for similarity
+                user_id=source_document.user_id
+            )
+
+            hybrid_results = hybrid_service.hybrid_search(search_request)
+
+            if not hybrid_results["success"]:
+                return self._fallback_similarity_search(document_id, limit)
+
+            # Filter out the source document and process results
+            similar_docs = []
+            seen_doc_ids = set()
+
+            for result in hybrid_results["results"]:
+                doc_id = result["document_id"]
+                if doc_id != document_id and doc_id not in seen_doc_ids:
+                    document = self.db.query(Document).filter(Document.id == doc_id).first()
+                    if document:
+                        similar_docs.append({
+                            "document": document,
+                            "similarity_score": result.get("combined_score", 0.5),
+                            "search_types": result.get("search_types", []),
+                            "chunk_text": result.get("chunk_text", "")[:200]  # Preview
+                        })
+                        seen_doc_ids.add(doc_id)
+                
+                if len(similar_docs) >= limit:
+                    break
+
+            return {
+                "success": True,
+                "similar_documents": similar_docs,
+                "search_metadata": hybrid_results.get("search_metadata", {})
+            }
+
+        except Exception as e:
+            logger.error(f"Error in similarity search: {str(e)}")
+            return self._fallback_similarity_search(document_id, limit)
+
+    def _fallback_similarity_search(self, document_id: int, limit: int = 10) -> Dict:
+        """Fallback similarity search using basic criteria"""
+        try:
+            similar_docs = []
             recent_docs = self.db.query(Document).filter(
                 Document.id != document_id,
                 Document.status == "processed"
@@ -165,20 +276,86 @@ class AdvancedSearch:
             for doc in recent_docs:
                 similar_docs.append({
                     "document": doc,
-                    "similarity_score": 0.8  # Placeholder score
+                    "similarity_score": 0.5,  # Lower confidence for fallback
+                    "search_types": ["fallback"],
+                    "chunk_text": ""
                 })
 
             return {
                 "success": True,
-                "similar_documents": similar_docs
+                "similar_documents": similar_docs,
+                "search_metadata": {"fallback_used": True}
             }
 
         except Exception as e:
-            logger.error(f"Error in similarity search: {str(e)}")
+            logger.error(f"Error in fallback similarity search: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
                 "similar_documents": []
+            }
+
+    def hybrid_content_search(self, query: str, user_id: int = None, user_role: str = "user",
+                            limit: int = 10, vector_weight: float = 0.7, text_weight: float = 0.3,
+                            similarity_threshold: float = 0.5) -> Dict:
+        """
+        Perform hybrid semantic search on document content using vector embeddings and full-text search
+        """
+        try:
+            # Create hybrid search service
+            hybrid_service = create_hybrid_search_service(self.db)
+            
+            # Create search request
+            search_request = HybridSearchRequest(
+                query=query,
+                limit=limit,
+                vector_weight=vector_weight,
+                text_weight=text_weight,
+                similarity_threshold=similarity_threshold,
+                user_id=user_id
+            )
+            
+            # Perform hybrid search
+            hybrid_results = hybrid_service.hybrid_search(search_request)
+            
+            if not hybrid_results["success"]:
+                return {
+                    "success": False,
+                    "error": hybrid_results.get("error", "Hybrid search failed"),
+                    "results": [],
+                    "total_count": 0
+                }
+            
+            # Filter results by user access if needed
+            if user_role != "admin" and user_id:
+                filtered_results = []
+                for result in hybrid_results["results"]:
+                    # Check if user has access to this document
+                    document = self.db.query(Document).filter(
+                        Document.id == result["document_id"]
+                    ).first()
+                    
+                    if document and (document.user_id == user_id or user_role == "admin"):
+                        filtered_results.append(result)
+                
+                hybrid_results["results"] = filtered_results
+                hybrid_results["total_count"] = len(filtered_results)
+            
+            return {
+                "success": True,
+                "results": hybrid_results["results"],
+                "total_count": hybrid_results["total_count"],
+                "response_time_ms": hybrid_results["response_time_ms"],
+                "search_metadata": hybrid_results["search_metadata"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in hybrid content search: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "results": [],
+                "total_count": 0
             }
 
     def get_search_suggestions(self, query: str, user_id: int, limit: int = 10) -> List[str]:

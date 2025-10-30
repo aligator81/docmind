@@ -256,17 +256,18 @@ class OptimizedEmbeddingService:
 
         return successful_embeddings, failed_embeddings
 
-    async def process_embeddings_from_db(self, db, resume: bool = False) -> EmbeddingResult:
-        """Process all chunks that need embeddings from database with optimized batch processing"""
+    async def process_embeddings_for_document(self, db, document_id: int, resume: bool = False) -> EmbeddingResult:
+        """Process embeddings for chunks of a specific document with optimized batch processing"""
         from ..models import Document, DocumentChunk, Embedding
 
         try:
-            # Get chunks that don't have embeddings yet for this provider
+            # Get chunks that don't have embeddings yet for this specific document
             chunks = db.query(DocumentChunk).join(
                 Document, DocumentChunk.document_id == Document.id
             ).outerjoin(
                 Embedding, DocumentChunk.id == Embedding.chunk_id
             ).filter(
+                DocumentChunk.document_id == document_id,
                 Embedding.id.is_(None)  # No embedding exists
             ).all()
 
@@ -384,6 +385,90 @@ class OptimizedEmbeddingService:
             ).count()
 
             print(f"📊 Total embeddings in database for {self.provider}: {final_count}")
+
+            return EmbeddingResult(
+                success=successful_embeddings > 0,
+                embeddings_created=successful_embeddings,
+                processing_time=processing_time,
+                metadata={
+                    "document_id": document_id,
+                    "total_chunks": len(chunks),
+                    "failed_embeddings": failed_embeddings,
+                    "final_embedding_count": final_count
+                }
+            )
+
+        except Exception as e:
+            print(f"❌ Error in optimized embedding processing for document {document_id}: {e}")
+            db.rollback()
+            return EmbeddingResult(
+                success=False,
+                embeddings_created=0,
+                processing_time=0.0,
+                metadata={"error": str(e)}
+            )
+
+    async def process_embeddings_from_db(self, db, resume: bool = False) -> EmbeddingResult:
+        """Process all chunks that need embeddings from database with optimized batch processing"""
+        from ..models import Document, DocumentChunk, Embedding
+
+        try:
+            # Get chunks that don't have embeddings yet for this provider
+            chunks = db.query(DocumentChunk).join(
+                Document, DocumentChunk.document_id == Document.id
+            ).outerjoin(
+                Embedding, DocumentChunk.id == Embedding.chunk_id
+            ).filter(
+                Embedding.id.is_(None)  # No embedding exists
+            ).all()
+
+            if not chunks:
+                print("ℹ️ No chunks found that need embeddings")
+                return EmbeddingResult(
+                    success=True,
+                    embeddings_created=0,
+                    processing_time=0.0,
+                    metadata={"message": "No chunks need embeddings"}
+                )
+
+            print(f"🔄 Processing {len(chunks)} chunks with optimized batch processing...")
+
+            # Process in batches
+            successful_embeddings = 0
+            failed_embeddings = 0
+            start_time = time.time()
+
+            for i in range(0, len(chunks), self.batch_size):
+                batch = chunks[i:i + self.batch_size]
+                print(f"📦 Processing batch {i//self.batch_size + 1}/{(len(chunks)-1)//self.batch_size + 1} ({len(batch)} chunks)")
+
+                # Generate embeddings for the batch
+                texts = [chunk.text for chunk in batch]
+                embeddings = await self.generate_embeddings(texts)
+
+                # Store embeddings
+                for chunk, embedding in zip(batch, embeddings):
+                    if embedding is not None:
+                        embedding_record = Embedding(
+                            chunk_id=chunk.id,
+                            embedding=embedding,
+                            provider=self.provider_name,
+                            model=self.model_name
+                        )
+                        db.add(embedding_record)
+                        successful_embeddings += 1
+                    else:
+                        failed_embeddings += 1
+                        print(f"⚠️ Failed to generate embedding for chunk {chunk.id}")
+
+                # Commit after each batch
+                db.commit()
+
+            processing_time = time.time() - start_time
+
+            # Verify final count
+            final_count = db.query(Embedding).count()
+            print(f"✅ Optimized embedding processing complete: {successful_embeddings} embeddings created, {failed_embeddings} failed, {processing_time:.2f}s")
 
             return EmbeddingResult(
                 success=successful_embeddings > 0,

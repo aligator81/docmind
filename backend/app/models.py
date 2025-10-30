@@ -1,6 +1,11 @@
+"""
+Database models for the application.
+"""
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ARRAY
+import json
+from typing import List
 from sqlalchemy.sql import func
 from .database import Base
 
@@ -57,7 +62,7 @@ class DocumentChunk(Base):
     created_at = Column(DateTime, default=func.now(), nullable=False)
 
     # Additional columns that exist in the database
-    page_numbers = Column(ARRAY(Integer))  # ARRAY in database
+    page_numbers = Column(Text)  # JSON array as text for SQLite compatibility
     section_title = Column(String(255))
     chunk_type = Column(String(50))
     token_count = Column(Integer)
@@ -82,6 +87,21 @@ class DocumentChunk(Base):
         """Set metadata for compatibility (no-op since column doesn't exist)"""
         pass
 
+    @property
+    def page_numbers_list(self) -> List[int]:
+        """Get page numbers as list."""
+        if self.page_numbers:
+            try:
+                return json.loads(self.page_numbers)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    @page_numbers_list.setter
+    def page_numbers_list(self, value: List[int]) -> None:
+        """Set page numbers from list."""
+        self.page_numbers = json.dumps(value) if value else None
+
     __table_args__ = (
         Index('idx_chunks_document_id', 'document_id'),
         Index('idx_chunks_text', 'chunk_text', postgresql_using='gin'),
@@ -94,12 +114,27 @@ class Embedding(Base):
     chunk_id = Column(Integer, ForeignKey("document_chunks.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String(255), nullable=False)
     original_filename = Column(String(255))
-    page_numbers = Column(ARRAY(Integer))
+    page_numbers = Column(Text)  # JSON array as text for SQLite compatibility
     title = Column(String(255))
     embedding_vector = Column(Text, nullable=False)  # JSON array as text (matches database schema)
     embedding_provider = Column(String(100), nullable=False)
     embedding_model = Column(String(100), nullable=False)
     created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    @property
+    def page_numbers_list(self) -> List[int]:
+        """Get page numbers as list."""
+        if self.page_numbers:
+            try:
+                return json.loads(self.page_numbers)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    @page_numbers_list.setter
+    def page_numbers_list(self, value: List[int]) -> None:
+        """Set page numbers from list."""
+        self.page_numbers = json.dumps(value) if value else None
 
     __table_args__ = (
         Index('idx_embeddings_chunk_id', 'chunk_id'),
@@ -237,3 +272,84 @@ class SystemPrompt(Base):
     id = Column(Integer, primary_key=True, index=True)
     prompt_text = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_text = Column(Text, nullable=False)
+    search_type = Column(String(20), nullable=False, default='hybrid')  # hybrid, vector, text
+    vector_weight = Column(Float, nullable=False, default=0.5)
+    text_weight = Column(Float, nullable=False, default=0.5)
+    search_results = Column(Text)  # JSON array of result IDs
+    result_count = Column(Integer)
+    response_time_ms = Column(Integer)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    search_metadata = Column(Text)  # JSON metadata about the search
+
+    __table_args__ = (
+        Index('idx_search_history_user_id', 'user_id'),
+        Index('idx_search_history_created_at', 'created_at'),
+        Index('idx_search_history_search_type', 'search_type'),
+    )
+
+
+class SearchQuery(Base):
+    """Model for tracking search queries for relevance tuning."""
+    __tablename__ = "search_queries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_text = Column(Text, nullable=False)
+    search_count = Column(Integer, default=1, nullable=False)
+    first_seen = Column(DateTime, default=func.now(), nullable=False)
+    last_seen = Column(DateTime, default=func.now(), nullable=False)
+    success_rate = Column(Float, default=0.0)  # Calculated success rate based on feedback
+
+    __table_args__ = (
+        Index('idx_search_query_text', 'query_text'),
+        Index('idx_search_query_last_seen', 'last_seen'),
+        Index('idx_search_query_success_rate', 'success_rate'),
+    )
+
+
+class UserFeedback(Base):
+    """Model for storing user feedback on search results."""
+    __tablename__ = "user_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_id = Column(Integer, ForeignKey("search_queries.id", ondelete="CASCADE"), nullable=False)
+    feedback_type = Column(String(20), nullable=False)  # positive, negative, neutral, click, skip
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    timestamp = Column(DateTime, default=func.now(), nullable=False)
+    metadata_ = Column(Text)  # JSON metadata about the feedback
+
+    # Relationships
+    query = relationship("SearchQuery", backref="feedback")
+    user = relationship("User", backref="feedback")
+
+    __table_args__ = (
+        Index('idx_feedback_query_id', 'query_id'),
+        Index('idx_feedback_user_id', 'user_id'),
+        Index('idx_feedback_timestamp', 'timestamp'),
+        Index('idx_feedback_type', 'feedback_type'),
+    )
+
+class QuestionAnswerExport(Base):
+    """Model for tracking question-answer Excel exports."""
+    __tablename__ = "question_answer_exports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    questions_count = Column(Integer, nullable=False)
+    document_ids = Column(Text)  # JSON array of document IDs used
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    status = Column(String(20), default="completed", nullable=False)  # processing, completed, failed
+    
+    __table_args__ = (
+        Index('idx_export_user_id', 'user_id'),
+        Index('idx_export_created_at', 'created_at'),
+    )

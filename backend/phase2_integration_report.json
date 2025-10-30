@@ -1,0 +1,125 @@
+{
+  "timestamp": "2025-10-28T14:14:47.961217",
+  "document_analysis": {
+    "document_type": "academic_paper",
+    "sections_count": 1,
+    "page_count": 1,
+    "confidence_scores": {
+      "section_detection": 0.7,
+      "page_detection": 0.1,
+      "document_classification": 0.8,
+      "overall": 0.5499999999999999
+    }
+  },
+  "chunk_quality": {
+    "average_score": 0.3911490683229814,
+    "individual_scores": [
+      0.327536231884058,
+      0.4547619047619048
+    ]
+  },
+  "citation_validation": {
+    "average_confidence": 0.05416666666666667,
+    "individual_scores": [
+      0.10833333333333334,
+      0.0
+    ]
+  },
+  "feedback_analysis": {
+    "total_feedback": 1,
+    "average_rating": 4,
+    "feedback_distribution": {
+      "positive": 1,
+      "negative": 0,
+      "neutral": 0
+    },
+    "category_analysis": {
+      "citation_accuracy": {
+        "count": 1,
+        "average_rating": 4,
+        "weighted_score": 1.0,
+        "feedback_types": {
+          "positive": 1,
+          "negative": 0,
+          "neutral": 0
+        }
+      },
+      "source_verification": {
+        "count": 0,
+        "average_rating": 0.0,
+        "weighted_score": 0.0,
+        "feedback_types": {
+          "positive": 0,
+          "negative": 0,
+          "neutral": 0
+        }
+      },
+      "context_relevance": {
+        "count": 0,
+        "average_rating": 0.0,
+        "weighted_score": 0.0,
+        "feedback_types": {
+          "positive": 0,
+          "negative": 0,
+          "neutral": 0
+        }
+      },
+      "position_accuracy": {
+        "count": 0,
+        "average_rating": 0.0,
+        "weighted_score": 0.0,
+        "feedback_types": {
+          "positive": 0,
+          "negative": 0,
+          "neutral": 0
+        }
+      },
+      "completeness": {
+        "count": 0,
+        "average_rating": 0.0,
+        "weighted_score": 0.0,
+        "feedback_types": {
+          "positive": 0,
+          "negative": 0,
+          "neutral": 0
+        }
+      },
+      "format_quality": {
+        "count": 0,
+        "average_rating": 0.0,
+        "weighted_score": 0.0,
+        "feedback_types": {
+          "positive": 0,
+          "negative": 0,
+          "neutral": 0
+        }
+      }
+    },
+    "improvement_priorities": [
+      [
+        "citation_accuracy",
+        0.0625
+      ]
+    ],
+    "confidence_score": 0.305
+  },
+  "improvement_priorities": [
+    [
+      "citation_accuracy",
+      0.0625
+    ]
+  ],
+  "chunking_recommendations": {
+    "optimal_chunk_size": 478,
+    "chunking_strategy": "semantic",
+    "boundary_preferences": [
+      "section_headers",
+      "paragraph_breaks",
+      "complete_sentences"
+    ],
+    "merge_suggestions": [
+      "Merge with adjacent chunks for better context"
+    ],
+    "split_suggestions": []
+  }
+}

@@ -9,7 +9,7 @@ import asyncio
 
 from ..database import get_db
 from ..models import User, Document, DocumentChunk, Embedding, ChatHistory, SystemPrompt
-from ..schemas import ChatMessage, ChatResponse
+from ..schemas import DocumentChatRequest, ChatResponse
 from ..auth import get_current_active_user
 from ..config import settings
 
@@ -27,25 +27,11 @@ router = APIRouter()
 @router.post("/chat/", response_model=ChatResponse)
 @router.post("", response_model=ChatResponse)  # Handle empty path as well
 async def chat_with_documents(
-    message: ChatMessage,
+    request: DocumentChatRequest,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Chat with documents using embeddings and LLM"""
-
-    # Handle case where message is received as string (JSON parsing issue)
-    if isinstance(message, str):
-        try:
-            import json
-            message_dict = json.loads(message)
-            # Create a ChatMessage object from the dict
-            message = ChatMessage(**message_dict)
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"ERROR: Failed to parse message as JSON: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid message format"
-            )
 
     # Check if API keys are configured
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -77,16 +63,16 @@ async def chat_with_documents(
         )
 
     # Validate document_ids if provided
-    if message.document_ids:
+    if request.document_ids:
         # Ensure document_ids is a list
-        if isinstance(message.document_ids, str):
+        if isinstance(request.document_ids, str):
             try:
                 import json
-                document_ids_list = json.loads(message.document_ids)
+                document_ids_list = json.loads(request.document_ids)
             except (json.JSONDecodeError, ValueError):
                 document_ids_list = []
         else:
-            document_ids_list = message.document_ids
+            document_ids_list = request.document_ids
 
         for doc_id in document_ids_list:
             # Admin and super_admin users can access any document
@@ -113,28 +99,28 @@ async def chat_with_documents(
                 )
 
     # Get relevant context using embeddings
-    if message.document_ids:
-        if isinstance(message.document_ids, str):
+    if request.document_ids:
+        if isinstance(request.document_ids, str):
             try:
                 import json
-                document_ids_list = json.loads(message.document_ids)
+                document_ids_list = json.loads(request.document_ids)
             except (json.JSONDecodeError, ValueError):
                 document_ids_list = []
         else:
-            document_ids_list = message.document_ids
+            document_ids_list = request.document_ids
         # Admin and super_admin users can search all documents, regular users only their own
         user_id_filter = None if current_user.role in ["admin", "super_admin"] else current_user.id
-        context, references = await get_context_from_db(message.message, db, document_ids_list, user_id_filter)
+        context, references = await get_context_from_db(request.message, db, document_ids_list, user_id_filter)
     else:
         # When no specific documents selected, search only current user's documents (admin/super_admin can search all)
         user_id_filter = None if current_user.role in ["admin", "super_admin"] else current_user.id
         if user_id_filter:
             # Regular users only search their own documents
             user_document_ids = [doc.id for doc in db.query(Document.id).filter(Document.user_id == current_user.id).all()]
-            context, references = await get_context_from_db(message.message, db, user_document_ids, current_user.id)
+            context, references = await get_context_from_db(request.message, db, user_document_ids, current_user.id)
         else:
             # Admin users can search all documents
-            context, references = await get_context_from_db(message.message, db, None, None)
+            context, references = await get_context_from_db(request.message, db, None, None)
 
     # Always generate response using LLM, even if no context
 
@@ -180,12 +166,12 @@ If no context is provided or the context is empty, respond as a general helpful 
 
     # Generate response using LLM
     response_text = await generate_llm_response(
-        message.message,
+        request.message,
         context,
         references,
         llm_provider,
         model_name,
-        message.document_ids,
+        request.document_ids,
         system_prompt_template
     )
 
@@ -217,7 +203,7 @@ If no context is provided or the context is empty, respond as a general helpful 
     # Save chat history
     chat_record = ChatHistory(
         user_id=current_user.id,
-        message=message.message,
+        message=request.message,
         response=response_text,
         context_docs=str(context_doc_ids),
         model_used=model_name
@@ -226,6 +212,7 @@ If no context is provided or the context is empty, respond as a general helpful 
     db.commit()
 
     return ChatResponse(
+        success=True,
         response=response_text,
         context_docs=context_doc_ids,
         model_used=model_name,
@@ -379,17 +366,26 @@ async def get_context_from_db(query: str, db: Session, document_ids: Optional[Li
                     print(f"Error processing embedding vector for chunk {chunk_id}: {e}")
                     continue
 
-        # Filter by minimum similarity threshold (e.g., 0.5) to avoid low-relevance chunks
-        min_similarity = 0.5
+        # Sort by similarity score (highest first) and take top chunks
+        similarities.sort(key=lambda x: x[6], reverse=True)
+        
+        # Use dynamic threshold - take at least top 3 chunks, but filter very low similarity ones
+        min_similarity = 0.3  # Lower threshold for better context retrieval
         filtered_similarities = [sim for sim in similarities if sim[6] >= min_similarity]
-
-        # Sort by similarity score (highest first) and take top 5
-        filtered_similarities.sort(key=lambda x: x[6], reverse=True)
-        results = filtered_similarities[:5]
+        
+        # If we have filtered results, use them; otherwise use top 3 regardless of similarity
+        if filtered_similarities:
+            results = filtered_similarities[:5]
+        else:
+            # If no chunks meet the threshold, take top 3 anyway for context
+            results = similarities[:3]
+            print(f"⚠️ No high-similarity chunks found, using top {len(results)} chunks anyway")
+        
         print(f"✅ Found {len(results)} relevant chunks from {len(limited_chunks)} searched (filtered from {len(similarities)} total)")
-
-        if not results:
-            return "", []
+        
+        # Debug: Show similarity scores
+        if results:
+            print(f"📊 Similarity scores: {[round(sim[6], 3) for sim in results]}")
 
         # Build context and references
         context_parts = []

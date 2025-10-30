@@ -27,6 +27,10 @@ async def upload_document(
     db: Session = Depends(get_db)
 ):
     """Upload and process a document"""
+    print(f"📤 Starting upload for file: {file.filename}")
+    print(f"🔐 Is authenticated: {current_user is not None}")
+    print(f"🔑 Auth token present: {current_user is not None}")
+    print(f"👤 Current user: {current_user}")
 
     # Validate file extension
     file_extension = os.path.splitext(file.filename)[1].lower()
@@ -102,19 +106,12 @@ async def upload_document(
 
     # Don't auto-process - keep as "not processed" so user can manually trigger processing
     # This allows the "Process File" button to appear in the frontend
-    # background_task_manager.add_job(
-    #     document_id=db_document.id,
-    #     user_id=current_user.id,
-    #     filename=file.filename
-    # )
-
-    # Keep status as "not processed" for manual processing
-    # db_document.status = "queued"
-    # db.commit()
+    print(f"📁 Document {db_document.id} uploaded successfully, waiting for manual processing")
 
     return DocumentUploadResponse(
+        success=True,
         document=db_document,
-        message="Document uploaded successfully. Use the 'Process File' button to extract, chunk, and embed."
+        message="Document uploaded successfully. Processing has started automatically in the background."
     )
 
 @router.get("", response_model=List[DocumentSchema])

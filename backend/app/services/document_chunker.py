@@ -28,22 +28,14 @@ from docling.chunking import HybridChunker
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
 
+from transformers import AutoTokenizer
+
 # Fix Unicode encoding issues on Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 warnings.filterwarnings("ignore", message=".*clean_up_tokenization_spaces.*")
 
-# Import the tokenizer from utils
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'utils'))
-try:
-    from tokenizer import OpenAITokenizerWrapper
-except ImportError:
-    # Fallback if utils not available
-    class OpenAITokenizerWrapper:
-        def encode(self, text: str) -> List[int]:
-            # Simple fallback tokenizer
-            return text.split()
 
 @dataclass
 class ChunkingResult:
@@ -57,7 +49,7 @@ class DocumentChunker:
     """Document chunking service"""
 
     def __init__(self):
-        self.tokenizer = OpenAITokenizerWrapper()
+        self.tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
         # Initialize DocumentConverter for content processing
         self.converter = DocumentConverter()

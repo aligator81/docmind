@@ -62,10 +62,17 @@ if RATE_LIMITING_ENABLED:
 # Mount static files for uploaded documents
 app.mount("/uploads", StaticFiles(directory="data/uploads"), name="uploads")
 
-# Include routers
-from .routers import auth, documents, chat, admin
-from .routers.processing import router as processing_router
+from .routers import auth, documents, chat, admin, hybrid_search
+from .routers.processing import router as processing_router, process_document_complete
+from .routers.search_feedback import router as search_feedback_router
+from .routers.question_export import router as question_export_router
 from .tasks import background_task_manager
+from .services import DocumentProcessor
+from fastapi import Depends, HTTPException
+from sqlalchemy.orm import Session
+from .auth import get_current_active_user
+from .database import get_db, SessionLocal
+from .models import User, Document
 
 app.include_router(
     auth.router,
@@ -97,6 +104,27 @@ app.include_router(
     tags=["processing"]
 )
 
+app.include_router(
+    hybrid_search.router,
+    prefix="/api/hybrid-search",
+    tags=["hybrid-search"]
+)
+
+app.include_router(
+    search_feedback_router,
+    prefix="/api/search-feedback",
+    tags=["search-feedback"]
+)
+
+app.include_router(
+    question_export_router,
+    prefix="/api/question-export",
+    tags=["question-export"]
+)
+
+# Initialize DocumentProcessor
+document_processor = DocumentProcessor()
+
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -115,6 +143,20 @@ async def root():
         ],
         "docs": "/api/docs"
     }
+
+@app.get("/process_document/{document_id}")
+async def process_document(document_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    """Process a specific document by ID"""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        # Process the document
+        result = await process_document_complete(document_id, current_user, db)
+        return {"message": f"Document {document_id} processing triggered", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
@@ -168,11 +210,48 @@ async def global_exception_handler(request, exc: Exception):
         client_ip=getattr(request.client, 'host', 'unknown')
     )
 
-    return {
-        "error": "Internal server error",
-        "message": "An unexpected error occurred",
-        "request_id": "unknown"
-    }
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "An unexpected error occurred", "message": "Internal server error"}
+    )
+
+
+from fastapi.exceptions import RequestValidationError
+from starlette.responses import JSONResponse
+from starlette.requests import Request
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handles validation errors and logs them."""
+    structured_logger.log_error(
+        "validation_error",
+        str(exc),
+        endpoint=request.url.path,
+        method=request.method,
+        client_ip=getattr(request.client, 'host', 'unknown'),
+        detail=exc.errors()
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors(), "message": "Validation error"}
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handles HTTP exceptions and logs them."""
+    structured_logger.log_error(
+        "http_exception",
+        str(exc),
+        endpoint=request.url.path,
+        method=request.method,
+        client_ip=getattr(request.client, 'host', 'unknown'),
+        status_code=exc.status_code,
+        detail=exc.detail
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "message": str(exc.detail)}
+    )
 
 # Shutdown handling for background tasks
 def shutdown_handler():

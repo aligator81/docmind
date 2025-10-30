@@ -3,6 +3,11 @@ const nextConfig = {
   /* config options here */
   reactStrictMode: true,
   transpilePackages: ['antd', '@ant-design/icons'],
+  logging: {
+    fetches: {
+      fullUrl: true,
+    },
+  },
   async rewrites() {
     return [
       {

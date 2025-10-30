@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Card, Typography, Row, Col, Statistic, Button, Upload, message, Spin } from 'antd';
+import { Card, Typography, Row, Col, Statistic, Button, Upload, message, Spin, Tag } from 'antd';
 import {
   FileTextOutlined,
   MessageOutlined,
   UserOutlined,
   UploadOutlined,
   InboxOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { AuthService } from '@/lib/auth';
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [processingDocuments, setProcessingDocuments] = useState<Set<number>>(new Set());
   const router = useRouter();
 
   useEffect(() => {

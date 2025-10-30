@@ -23,6 +23,7 @@ import {
   MessageOutlined,
   SettingOutlined,
   TeamOutlined,
+  FileExcelOutlined,
 } from '@ant-design/icons';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -107,6 +108,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       key: '/chat',
       icon: <MessageOutlined />,
       label: <Link href="/chat">Chat</Link>,
+    },
+    {
+      key: '/question-export',
+      icon: <FileExcelOutlined />,
+      label: <Link href="/question-export">Export Questions</Link>,
     },
   ];
 

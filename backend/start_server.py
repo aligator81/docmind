@@ -18,7 +18,7 @@ if __name__ == "__main__":
     workers = int(os.getenv("WORKERS", "1"))  # Default to 1 worker for development
     reload = os.getenv("API_RELOAD", "true").lower() == "true"
 
-    print("🚀 Starting Document Q&A API Server")
+    print("🚀 Ouartech ")
     print(f"📍 Host: {host}")
     print(f"🔌 Port: {port}")
     print(f"👷 Workers: {workers}")

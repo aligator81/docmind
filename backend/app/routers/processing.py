@@ -190,8 +190,8 @@ async def create_embeddings(
     db.commit()
 
     try:
-        # Process embeddings using OPTIMIZED service
-        result = await optimized_embedding_service.process_embeddings_from_db(db)
+        # Process embeddings for this specific document using OPTIMIZED service
+        result = await optimized_embedding_service.process_embeddings_for_document(db, document_id)
 
         if result.success:
             # Update document status to completed
@@ -260,8 +260,8 @@ async def create_optimized_embeddings(
     db.commit()
 
     try:
-        # Process embeddings using OPTIMIZED service
-        result = await optimized_embedding_service.process_embeddings_from_db(db)
+        # Process embeddings for this specific document using OPTIMIZED service
+        result = await optimized_embedding_service.process_embeddings_for_document(db, document_id)
 
         if result.success:
             # Update document status to completed
@@ -311,6 +311,8 @@ async def process_document_complete(
     db: Session = Depends(get_db)
 ):
     """Complete document processing pipeline: Extract → Chunk → Embed"""
+    print(f"🚀 Starting complete processing for document {document_id}")
+    print(f"👤 User: {current_user.username} (ID: {current_user.id})")
     # Verify document ownership
     document = db.query(Document).filter(
         Document.id == document_id,
@@ -318,16 +320,24 @@ async def process_document_complete(
     ).first()
 
     if not document:
+        print(f"❌ Document {document_id} not found for user {current_user.id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
 
+    print(f"📄 Found document: {document.original_filename} (ID: {document.id})")
+    print(f"📁 File path: {document.file_path}")
+    print(f"📊 Current status: {document.status}")
+
     if not document.file_path or not os.path.exists(document.file_path):
+        print(f"❌ File not found on disk: {document.file_path}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Document file not found on disk"
         )
+
+    print(f"✅ File exists: {document.file_path}")
 
     # Update document status to processing
     document.status = "processing"
@@ -335,9 +345,12 @@ async def process_document_complete(
 
     try:
         # Step 1: Extract document content
+        print(f"📝 Step 1: Starting extraction for document {document_id}")
         extraction_result = await document_processor.extract_document(document.file_path, original_filename=document.original_filename)
+        print(f"📝 Extraction result: success={extraction_result.success}, method={extraction_result.method}, time={extraction_result.processing_time}s")
 
         if not extraction_result.success:
+            print(f"❌ Extraction failed: {extraction_result.method}")
             document.status = "failed"
             db.commit()
             return ProcessingResult(
@@ -365,8 +378,8 @@ async def process_document_complete(
                 metadata={"error": "chunking_failed"}
             )
 
-        # Step 3: Create embeddings using OPTIMIZED service
-        embedding_result = await optimized_embedding_service.process_embeddings_from_db(db)
+        # Step 3: Create embeddings for this specific document using the OPTIMIZED embedding service
+        embedding_result = await optimized_embedding_service.process_embeddings_for_document(db, document_id)
 
         if not embedding_result.success:
             document.status = "failed"

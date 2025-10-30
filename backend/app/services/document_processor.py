@@ -45,6 +45,14 @@ except ImportError:
     TORCH_AVAILABLE = False
     torch = None
 
+# PDF processing imports
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+    PyPDF2 = None
+
 # Fix Unicode encoding issues on Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
@@ -265,7 +273,7 @@ class DocumentProcessor:
             return None
         return Mistral(api_key=api_key)
 
-    async def extract_with_docling(self, file_path: str, enable_ocr: bool = False) -> ProcessingResult:
+    async def extract_with_docling(self, file_path: str, enable_ocr: bool = False, original_filename: Optional[str] = None) -> ProcessingResult:
         """Extract document using Docling (local processing)"""
         try:
             # Check cache first
@@ -273,9 +281,7 @@ class DocumentProcessor:
             if cached_result:
                 print(f"📋 Using cached Docling result for {file_path}")
                 # Update filename to use original if available
-                if original_filename:
-                    output_name = os.path.splitext(original_filename)[0]
-                    cached_result['filename'] = f"{self.output_dir}/{output_name}_docling_extracted.md"
+                output_name = os.path.splitext(original_filename or os.path.basename(file_path))[0]
                 return ProcessingResult(
                     success=True,
                     content=cached_result.get('content', ''),
@@ -284,10 +290,7 @@ class DocumentProcessor:
                     metadata=cached_result
                 )
 
-            if original_filename:
-                output_name = os.path.splitext(original_filename)[0]
-            else:
-                output_name = os.path.splitext(os.path.basename(file_path))[0]
+            output_name = os.path.splitext(original_filename or os.path.basename(file_path))[0]
             filename = f"{self.output_dir}/{output_name}_docling_extracted.md"
 
             # Check file size
@@ -455,13 +458,10 @@ class DocumentProcessor:
                 processing_time=processing_time
             )
 
-    async def extract_with_mistral_ocr(self, file_path: str) -> ProcessingResult:
+    async def extract_with_mistral_ocr(self, file_path: str, original_filename: Optional[str] = None) -> ProcessingResult:
         """Extract document using Mistral OCR (cloud processing)"""
         try:
-            if original_filename:
-                output_name = os.path.splitext(original_filename)[0]
-            else:
-                output_name = os.path.splitext(os.path.basename(file_path))[0]
+            output_name = os.path.splitext(original_filename or os.path.basename(file_path))[0]
             filename = f"{self.output_dir}/{output_name}_mistral_extracted.md"
 
             print(f"☁️ Extracting with Mistral OCR: {file_path}")
@@ -544,14 +544,14 @@ class DocumentProcessor:
                         content += page.markdown + "\n\n"
                     elif hasattr(page, 'content') and page.content:
                         content += page.content + "\n\n"
-            else:
-                print("❌ No content extracted from document with Mistral OCR")
-                return ProcessingResult(
-                    success=False,
-                    content="",
-                    method="no_content",
-                    processing_time=processing_time
-                )
+                else:
+                    print("❌ No content extracted from document with Mistral OCR")
+                    return ProcessingResult(
+                        success=False,
+                        content="",
+                        method="no_content",
+                        processing_time=processing_time
+                    )
 
             # Save to file
             if self._save_to_file(content, filename):
@@ -645,12 +645,12 @@ class DocumentProcessor:
                     "processing_time": result.processing_time,
                     "original_filename": original_filename
                 })
-                return result
+            return result
 
         # Try preferred method first for non-markdown files
         if prefer_cloud:
             print("☁️ Trying Mistral OCR first...")
-            result = await self.extract_with_mistral_ocr(file_path)
+            result = await self.extract_with_mistral_ocr(file_path, original_filename)
             if result.success:
                 self.document_cache.cache_result(file_path, "unified_extraction", {
                     "content": result.content,
@@ -661,7 +661,7 @@ class DocumentProcessor:
                 return result
 
             print("⚠️ Mistral OCR failed, trying Docling...")
-            result = await self.extract_with_docling(file_path)
+            result = await self.extract_with_docling(file_path, original_filename=original_filename)
         else:
             print("🔍 Trying Docling first...")
             result = await self.extract_with_docling(file_path)
@@ -676,6 +676,11 @@ class DocumentProcessor:
 
             print("⚠️ Docling failed, trying Mistral OCR...")
             result = await self.extract_with_mistral_ocr(file_path)
+
+        # If both Docling and Mistral OCR fail, try PyPDF2 for PDF files
+        if not result.success and file_extension == '.pdf' and PYPDF2_AVAILABLE:
+            print("⚠️ Mistral OCR failed, trying PyPDF2 fallback...")
+            result = self._extract_with_pypdf2(file_path)
 
         if result.success:
             self.document_cache.cache_result(file_path, "unified_extraction", {
@@ -715,6 +720,64 @@ class DocumentProcessor:
                 processing_time=0.0
             )
 
+    def _extract_with_pypdf2(self, file_path: str) -> ProcessingResult:
+        """Extract text from PDF using PyPDF2 as fallback"""
+        try:
+            if not PYPDF2_AVAILABLE:
+                return ProcessingResult(
+                    success=False,
+                    content="",
+                    method="pypdf2_not_available",
+                    processing_time=0.0
+                )
+
+            start_time = time.time()
+            print(f"📄 Trying PyPDF2 extraction for: {file_path}")
+
+            content = ""
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                
+                for page_num, page in enumerate(pdf_reader.pages):
+                    try:
+                        page_text = page.extract_text()
+                        if page_text:
+                            content += f"--- Page {page_num + 1} ---\n{page_text}\n\n"
+                    except Exception as page_error:
+                        print(f"⚠️ Error extracting page {page_num + 1}: {page_error}")
+                        continue
+
+            processing_time = time.time() - start_time
+
+            if content.strip():
+                print(f"✅ PyPDF2 extraction completed in {processing_time:.2f} seconds")
+                print(f"📄 Extracted {len(content)} characters from {len(pdf_reader.pages)} pages")
+                return ProcessingResult(
+                    success=True,
+                    content=content,
+                    method="pypdf2",
+                    processing_time=processing_time,
+                    metadata={"pages_processed": len(pdf_reader.pages)}
+                )
+            else:
+                print(f"❌ PyPDF2 extracted no content from {file_path}")
+                return ProcessingResult(
+                    success=False,
+                    content="",
+                    method="pypdf2_no_content",
+                    processing_time=processing_time
+                )
+
+        except Exception as e:
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0
+            print(f"❌ PyPDF2 extraction failed: {e}")
+            return ProcessingResult(
+                success=False,
+                content="",
+                method="pypdf2_error",
+                processing_time=processing_time
+            )
+
     async def process_from_database(self, db, mark_processed: bool = False, timeout_hours: float = None) -> int:
         """Process all unprocessed documents from database"""
         from ..models import Document
@@ -745,7 +808,11 @@ class DocumentProcessor:
                 if file_path and os.path.exists(file_path):
                     print(f"\n🔄 Processing [{success_count + 1}/{len(documents)}]: {doc.filename} (ID: {doc.id})")
 
-                    result = await self.extract_document(doc.file_path, original_filename=doc.original_filename)
+                    try:
+                        result = await self.extract_document(doc.file_path, original_filename=doc.original_filename)
+                    except Exception as e:
+                        print(f"❌ Error during extract_document: {e}")
+                        result = ProcessingResult(success=False, content="", method="extract_error", processing_time=0.0)
 
                     if result.success:
                         # Update database with extracted content
