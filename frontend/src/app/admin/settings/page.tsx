@@ -50,6 +50,7 @@ interface APIConfig {
   api_key: string;
   is_active: boolean;
   model?: string;
+  embedding_model?: string;
   max_tokens?: number;
   temperature?: number;
 }
@@ -71,16 +72,28 @@ export default function AdminSettingsPage() {
   const router = useRouter();
 
   const modelOptions = {
-    openai: [
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-      { value: 'gpt-4', label: 'GPT-4' },
-      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
-    ],
-    mistral: [
-      { value: 'mistral-large', label: 'Mistral Large' },
-      { value: 'mistral-medium', label: 'Mistral Medium' },
-      { value: 'mistral-small', label: 'Mistral Small' }
-    ]
+    openai: {
+      chat: [
+        { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+        { value: 'gpt-4', label: 'GPT-4' },
+        { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' }
+      ],
+      embedding: [
+        { value: 'text-embedding-3-large', label: 'text-embedding-3-large' },
+        { value: 'text-embedding-3-small', label: 'text-embedding-3-small' },
+        { value: 'text-embedding-ada-002', label: 'text-embedding-ada-002' }
+      ]
+    },
+    mistral: {
+      chat: [
+        { value: 'mistral-large', label: 'Mistral Large' },
+        { value: 'mistral-medium', label: 'Mistral Medium' },
+        { value: 'mistral-small', label: 'Mistral Small' }
+      ],
+      embedding: [
+        { value: 'mistral-embed', label: 'mistral-embed' }
+      ]
+    }
   };
 
   useEffect(() => {
@@ -253,6 +266,7 @@ export default function AdminSettingsPage() {
                     initialValues={{
                       is_active: true,
                       model: 'gpt-4o-mini',
+                      embedding_model: 'text-embedding-3-large',
                       max_tokens: 1000,
                       temperature: 0.7,
                     }}
@@ -269,7 +283,10 @@ export default function AdminSettingsPage() {
                           <Select
                           placeholder="Select AI provider"
                           onChange={(value) => {
-                            form.setFieldsValue({ model: modelOptions[value as 'openai' | 'mistral'][0].value });
+                            form.setFieldsValue({
+                              model: modelOptions[value as 'openai' | 'mistral'].chat[0].value,
+                              embedding_model: modelOptions[value as 'openai' | 'mistral'].embedding[0].value
+                            });
                             setSelectedProvider(value as 'openai' | 'mistral');
                           }}
                           aria-label="Select AI Provider"
@@ -306,14 +323,14 @@ export default function AdminSettingsPage() {
 
                     <Row gutter={16}>
                       <Col xs={24} md={12}>
-                        <Tooltip title="Select the AI model to use for processing. Options vary by provider.">
+                        <Tooltip title="Select the AI model to use for chat responses. Options vary by provider.">
                           <Form.Item
                             name="model"
-                            label="Model"
-                            rules={[{ required: true, message: 'Please select a model' }]}
+                            label="Chat Model"
+                            rules={[{ required: true, message: 'Please select a chat model' }]}
                           >
-                            <Select placeholder="Select model" aria-label="Select AI Model">
-                              {modelOptions[selectedProvider].map(option => (
+                            <Select placeholder="Select chat model" aria-label="Select Chat Model">
+                              {modelOptions[selectedProvider].chat.map(option => (
                                 <Option key={option.value} value={option.value}>
                                   {option.label}
                                 </Option>
@@ -323,6 +340,26 @@ export default function AdminSettingsPage() {
                         </Tooltip>
                       </Col>
 
+                      <Col xs={24} md={12}>
+                        <Tooltip title="Select the AI model to use for document embeddings. Options vary by provider.">
+                          <Form.Item
+                            name="embedding_model"
+                            label="Embedding Model"
+                            rules={[{ required: true, message: 'Please select an embedding model' }]}
+                          >
+                            <Select placeholder="Select embedding model" aria-label="Select Embedding Model">
+                              {modelOptions[selectedProvider].embedding.map(option => (
+                                <Option key={option.value} value={option.value}>
+                                  {option.label}
+                                </Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
+                        </Tooltip>
+                      </Col>
+                    </Row>
+
+                    <Row gutter={16}>
                       <Col xs={24} md={12}>
                         <Tooltip title="Maximum number of tokens for AI responses (1-4000).">
                           <Form.Item
@@ -338,9 +375,6 @@ export default function AdminSettingsPage() {
                           </Form.Item>
                         </Tooltip>
                       </Col>
-                    </Row>
-
-                    <Row gutter={16}>
                       <Col xs={24} md={12}>
                         <Tooltip title="Controls randomness in AI responses (0.0 = deterministic, 2.0 = highly random).">
                           <Form.Item
@@ -796,7 +830,8 @@ export default function AdminSettingsPage() {
         {pendingValues && (
           <div>
             <p>Provider: {pendingValues.provider}</p>
-            <p>Model: {pendingValues.model}</p>
+            <p>Chat Model: {pendingValues.model}</p>
+            <p>Embedding Model: {pendingValues.embedding_model}</p>
             <p>Max Tokens: {pendingValues.max_tokens}</p>
             <p>Temperature: {pendingValues.temperature}</p>
           </div>

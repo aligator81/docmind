@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress Bar Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .progress-container {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #108ee9, #87d068);
+            transition: width 0.3s ease;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        button:disabled {
+            background: #d9d9d9;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Progress Bar Test</h1>
+    
+    <div class="progress-container">
+        <h3>Processing Progress</h3>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+        <div class="progress-info">
+            <span id="progressText">0/0 questions (0%)</span>
+            <span id="currentQuestion">Current: None</span>
+        </div>
+        <div id="statusMessage" style="margin-top: 10px;"></div>
+    </div>
+    
+    <button onclick="startProgressTest()">Start Progress Test</button>
+    <button onclick="stopProgressTest()" disabled id="stopBtn">Stop Test</button>
+
+    <script>
+        let progressInterval = null;
+        let currentProgress = 0;
+        const totalQuestions = 10;
+
+        function startProgressTest() {
+            document.getElementById('stopBtn').disabled = false;
+            document.querySelector('button').disabled = true;
+            currentProgress = 0;
+            
+            progressInterval = setInterval(() => {
+                currentProgress++;
+                updateProgress(currentProgress, totalQuestions, `Test Question ${currentProgress}`);
+                
+                if (currentProgress >= totalQuestions) {
+                    stopProgressTest();
+                    document.getElementById('statusMessage').innerHTML = 
+                        '<span style="color: green;">✅ Processing completed!</span>';
+                }
+            }, 1000);
+        }
+
+        function stopProgressTest() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            document.getElementById('stopBtn').disabled = true;
+            document.querySelector('button').disabled = false;
+        }
+
+        function updateProgress(processed, total, currentQuestion) {
+            const percentage = Math.round((processed / total) * 100);
+            
+            document.getElementById('progressFill').style.width = percentage + '%';
+            document.getElementById('progressText').textContent = 
+                `${processed}/${total} questions (${percentage}%)`;
+            document.getElementById('currentQuestion').textContent = 
+                `Current: ${currentQuestion}`;
+        }
+
+        // Test the progress bar display
+        updateProgress(3, 10, "Sample Question");
+    </script>
+</body>
+</html>

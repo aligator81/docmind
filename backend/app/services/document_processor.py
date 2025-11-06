@@ -376,8 +376,12 @@ class DocumentProcessor:
             print("🔄 Starting document conversion (this may take several minutes for large files)...")
             start_time = time.time()
 
-            # Add timeout handling for large files (minimum 60 seconds for small files)
-            timeout_seconds = max(60, min(int(file_size_mb * 2), 1800))  # Max 30 minutes, min 60 seconds
+            # Adjust timeout based on file type - images need more time for OCR
+            if file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+                timeout_seconds = max(120, min(int(file_size_mb * 5), 3600))  # Max 60 minutes for images
+            else:
+                timeout_seconds = max(60, min(int(file_size_mb * 2), 1800))  # Max 30 minutes for other files
+            
             print(f"⏱️ Setting timeout to {timeout_seconds} seconds ({timeout_seconds/60:.1f} minutes)")
 
             try:
@@ -441,6 +445,7 @@ class DocumentProcessor:
 
             except asyncio.TimeoutError:
                 print(f"⏰ Document conversion timed out after {timeout_seconds} seconds")
+                print("💡 Tip: For complex images, try using Mistral OCR or simplify the image")
                 return ProcessingResult(
                     success=False,
                     content="",
@@ -677,6 +682,11 @@ class DocumentProcessor:
             print("⚠️ Docling failed, trying Mistral OCR...")
             result = await self.extract_with_mistral_ocr(file_path)
 
+        # If both Docling and Mistral OCR fail, try direct EasyOCR for images
+        if not result.success and file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+            print("⚠️ Both Docling and Mistral OCR failed, trying direct EasyOCR...")
+            result = await self._extract_with_easyocr(file_path)
+
         # If both Docling and Mistral OCR fail, try PyPDF2 for PDF files
         if not result.success and file_extension == '.pdf' and PYPDF2_AVAILABLE:
             print("⚠️ Mistral OCR failed, trying PyPDF2 fallback...")
@@ -718,6 +728,67 @@ class DocumentProcessor:
                 content="",
                 method="markdown_error",
                 processing_time=0.0
+            )
+
+    async def _extract_with_easyocr(self, file_path: str) -> ProcessingResult:
+        """Extract text from image using direct EasyOCR as fallback"""
+        try:
+            import easyocr
+            
+            print(f"🔍 Trying direct EasyOCR extraction for: {file_path}")
+            start_time = time.time()
+            
+            # Initialize EasyOCR reader
+            reader = easyocr.Reader(['en'])
+            
+            # Read the image and extract text
+            result = reader.readtext(file_path)
+            
+            processing_time = time.time() - start_time
+            
+            if result:
+                content = ""
+                for detection in result:
+                    text = detection[1]
+                    confidence = detection[2]
+                    if confidence > 0.5:  # Only include high-confidence detections
+                        content += text + "\n"
+                
+                if content.strip():
+                    print(f"✅ EasyOCR extraction completed in {processing_time:.2f} seconds")
+                    print(f"📄 Extracted {len(content)} characters")
+                    return ProcessingResult(
+                        success=True,
+                        content=content,
+                        method="easyocr_direct",
+                        processing_time=processing_time,
+                        metadata={"detections": len(result)}
+                    )
+                else:
+                    print(f"❌ EasyOCR extracted no high-confidence content from {file_path}")
+                    return ProcessingResult(
+                        success=False,
+                        content="",
+                        method="easyocr_no_content",
+                        processing_time=processing_time
+                    )
+            else:
+                print(f"❌ EasyOCR found no text in {file_path}")
+                return ProcessingResult(
+                    success=False,
+                    content="",
+                    method="easyocr_no_detections",
+                    processing_time=processing_time
+                )
+                
+        except Exception as e:
+            processing_time = time.time() - start_time if 'start_time' in locals() else 0
+            print(f"❌ EasyOCR extraction failed: {e}")
+            return ProcessingResult(
+                success=False,
+                content="",
+                method="easyocr_error",
+                processing_time=processing_time
             )
 
     def _extract_with_pypdf2(self, file_path: str) -> ProcessingResult:

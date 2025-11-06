@@ -73,6 +73,10 @@ class APIConfigCreate(BaseModel):
     provider: str = Field(..., pattern=r'^(openai|mistral)$')
     api_key: str
     is_active: bool = True
+    model: Optional[str] = Field(None, description="Chat model to use")
+    embedding_model: Optional[str] = Field(None, description="Embedding model to use")
+    max_tokens: Optional[int] = Field(1000, ge=100, le=4000, description="Maximum tokens for chat responses")
+    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Temperature for chat responses")
 
 
 class APIConfig(BaseModel):
@@ -80,6 +84,10 @@ class APIConfig(BaseModel):
     id: int
     provider: str
     is_active: bool
+    model: Optional[str] = None
+    embedding_model: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

@@ -404,10 +404,7 @@ async def configure_api_keys(
     current_user: User = Depends(get_admin_user),
     db: Session = Depends(get_db)
 ):
-    """Configure API keys (admin only)"""
-    # In a real implementation, you might want to store these in the database
-    # For now, we'll just validate and return success
-
+    """Configure API keys and models (admin only)"""
     if config.provider not in ["openai", "mistral"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -418,6 +415,32 @@ async def configure_api_keys(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="API key is required"
+        )
+
+    # Define available models for validation
+    available_models = {
+        "openai": {
+            "chat": ["gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
+            "embedding": ["text-embedding-3-large", "text-embedding-3-small", "text-embedding-ada-002"]
+        },
+        "mistral": {
+            "chat": ["mistral-large", "mistral-medium", "mistral-small"],
+            "embedding": ["mistral-embed"]
+        }
+    }
+
+    # Validate chat model if provided
+    if config.model and config.model not in available_models[config.provider]["chat"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid chat model for {config.provider}. Available: {', '.join(available_models[config.provider]['chat'])}"
+        )
+
+    # Validate embedding model if provided
+    if config.embedding_model and config.embedding_model not in available_models[config.provider]["embedding"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid embedding model for {config.provider}. Available: {', '.join(available_models[config.provider]['embedding'])}"
         )
 
     # Validate API key by making a test request
@@ -438,12 +461,71 @@ async def configure_api_keys(
             detail=f"Invalid API key: {str(e)}"
         )
 
-    # In a production system, you might want to store this in the database
-    # For now, we'll just return success
+    # Save configuration to .env file for persistence
+    env_file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+    
+    # Read existing .env file if it exists
+    env_lines = []
+    if os.path.exists(env_file_path):
+        with open(env_file_path, 'r') as f:
+            env_lines = f.readlines()
+    
+    # Update or add configuration lines
+    config_updates = {
+        f"{config.provider.upper()}_API_KEY": config.api_key,
+        f"{config.provider.upper()}_CHAT_MODEL": config.model,
+        f"{config.provider.upper()}_EMBEDDING_MODEL": config.embedding_model,
+        f"{config.provider.upper()}_MAX_TOKENS": str(config.max_tokens) if config.max_tokens else None,
+        f"{config.provider.upper()}_TEMPERATURE": str(config.temperature) if config.temperature else None
+    }
+    
+    # Update existing lines or add new ones
+    updated_lines = []
+    processed_keys = set()
+    
+    for line in env_lines:
+        line_stripped = line.strip()
+        if line_stripped and not line_stripped.startswith('#'):
+            key = line_stripped.split('=')[0]
+            if key in config_updates and config_updates[key] is not None:
+                # Update existing line
+                updated_lines.append(f"{key}={config_updates[key]}\n")
+                processed_keys.add(key)
+            else:
+                # Keep existing line unchanged
+                updated_lines.append(line)
+        else:
+            # Keep comments and empty lines
+            updated_lines.append(line)
+    
+    # Add any new configuration that wasn't in the file
+    for key, value in config_updates.items():
+        if key not in processed_keys and value is not None:
+            updated_lines.append(f"{key}={value}\n")
+    
+    # Write updated .env file
+    with open(env_file_path, 'w') as f:
+        f.writelines(updated_lines)
+    
+    # Also update environment variables for immediate use
+    os.environ[f"{config.provider.upper()}_API_KEY"] = config.api_key
+    if config.model:
+        os.environ[f"{config.provider.upper()}_CHAT_MODEL"] = config.model
+    if config.embedding_model:
+        os.environ[f"{config.provider.upper()}_EMBEDDING_MODEL"] = config.embedding_model
+    if config.max_tokens:
+        os.environ[f"{config.provider.upper()}_MAX_TOKENS"] = str(config.max_tokens)
+    if config.temperature:
+        os.environ[f"{config.provider.upper()}_TEMPERATURE"] = str(config.temperature)
+
     return {
-        "message": f"{config.provider.title()} API key configured successfully",
+        "message": f"{config.provider.title()} API configuration saved successfully",
         "provider": config.provider,
-        "is_active": config.is_active
+        "is_active": config.is_active,
+        "model": config.model,
+        "embedding_model": config.embedding_model,
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature
     }
 
 @router.post("/branding")

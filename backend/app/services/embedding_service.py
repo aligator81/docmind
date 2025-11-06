@@ -30,6 +30,10 @@ import numpy as np
 from openai import OpenAI
 from mistralai import Mistral
 
+# Import settings
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from config import settings
+
 # Fix Unicode encoding issues on Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
@@ -71,10 +75,10 @@ class EmbeddingService:
         self.progress_save_interval = 3  # Save progress every 3 chunks
         self.checkpoint_file = 'embedding_checkpoint.pkl'
 
-        # Chunk size optimization for large files
-        self.max_chunk_size = 4000  # Reduced maximum tokens per chunk
-        self.optimal_chunk_size = 2000  # Reduced optimal tokens per chunk
-        self.emergency_chunk_size = 1000  # Emergency chunk size
+        # Chunk size optimization for large files - reduced for safety with OpenAI's 8192 token limit
+        self.max_chunk_size = 3000  # Reduced from 4000 for safety buffer
+        self.optimal_chunk_size = 1500
+        self.emergency_chunk_size = 800
 
         # Initialize API clients
         self.openai_client = None
@@ -90,15 +94,15 @@ class EmbeddingService:
     def _initialize_clients(self):
         """Initialize API clients based on provider"""
         if self.provider == "openai":
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = settings.openai_api_key
             if not api_key:
-                raise ValueError("OpenAI API key not found in environment variables")
+                raise ValueError("OpenAI API key not found in configuration")
             self.openai_client = OpenAI(api_key=api_key)
             print("✅ Initialized OpenAI client for embeddings")
         elif self.provider == "mistral":
-            api_key = os.getenv("MISTRAL_API_KEY")
+            api_key = settings.mistral_api_key
             if not api_key:
-                raise ValueError("Mistral API key not found in environment variables")
+                raise ValueError("Mistral API key not found in configuration")
             self.mistral_client = Mistral(api_key=api_key)
             print("✅ Initialized Mistral client for embeddings")
         else:
@@ -249,16 +253,18 @@ class EmbeddingService:
 
                 if self.provider == "openai":
                     try:
+                        # Get configured embedding model from settings
+                        embedding_model = settings.openai_embedding_model
                         response = await asyncio.get_event_loop().run_in_executor(
                             None,
                             lambda: self.openai_client.embeddings.create(
-                                model="text-embedding-3-large",
+                                model=embedding_model,
                                 input=sub_chunk,
                                 timeout=self.embedding_timeout
                             )
                         )
                         embeddings.append(response.data[0].embedding)
-                        print(f"✅ Sub-chunk {i+1}/{len(sub_chunks)} embedded successfully")
+                        print(f"✅ Sub-chunk {i+1}/{len(sub_chunks)} embedded successfully using {embedding_model}")
                     except Exception as e:
                         print(f"❌ OpenAI API error for sub-chunk {i+1}: {e}")
                         if "rate limit" in str(e).lower():
@@ -268,15 +274,17 @@ class EmbeddingService:
                         raise
                 elif self.provider == "mistral":
                     try:
+                        # Get configured embedding model from settings
+                        embedding_model = settings.mistral_embedding_model
                         response = await asyncio.get_event_loop().run_in_executor(
                             None,
                             lambda: self.mistral_client.embeddings.create(
-                                model="mistral-embed",
+                                model=embedding_model,
                                 inputs=[sub_chunk]
                             )
                         )
                         embeddings.append(response.data[0].embedding)
-                        print(f"✅ Sub-chunk {i+1}/{len(sub_chunks)} embedded successfully")
+                        print(f"✅ Sub-chunk {i+1}/{len(sub_chunks)} embedded successfully using {embedding_model}")
                     except Exception as e:
                         print(f"❌ Mistral API error for sub-chunk {i+1}: {e}")
                         if "rate limit" in str(e).lower():
@@ -297,10 +305,12 @@ class EmbeddingService:
             # Single chunk processing
             if self.provider == "openai":
                 try:
+                    # Get configured embedding model from settings
+                    embedding_model = settings.openai_embedding_model
                     response = await asyncio.get_event_loop().run_in_executor(
                         None,
                         lambda: self.openai_client.embeddings.create(
-                            model="text-embedding-3-large",
+                            model=embedding_model,
                             input=text,
                             timeout=self.embedding_timeout
                         )
@@ -315,10 +325,12 @@ class EmbeddingService:
                     raise
             elif self.provider == "mistral":
                 try:
+                    # Get configured embedding model from settings
+                    embedding_model = settings.mistral_embedding_model
                     response = await asyncio.get_event_loop().run_in_executor(
                         None,
                         lambda: self.mistral_client.embeddings.create(
-                            model="mistral-embed",
+                            model=embedding_model,
                             inputs=[text]
                         )
                     )
@@ -367,6 +379,12 @@ class EmbeddingService:
             print(f"✅ Generated embedding in {len(embedding)} dimensions")
 
             # Store embedding in database
+            # Get configured embedding model from settings
+            if self.provider == "openai":
+                embedding_model = settings.openai_embedding_model
+            else:
+                embedding_model = settings.mistral_embedding_model
+            
             db_embedding = Embedding(
                 chunk_id=chunk_id,
                 filename=document_filename,
@@ -375,7 +393,7 @@ class EmbeddingService:
                 title=section_title,
                 embedding_vector=embedding,
                 embedding_provider=self.provider,
-                embedding_model="text-embedding-3-large" if self.provider == "openai" else "mistral-embed"
+                embedding_model=embedding_model
             )
 
             db.add(db_embedding)

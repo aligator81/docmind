@@ -18,13 +18,17 @@ requests==2.32.3
 httpx==0.25.0
 
 # Data processing (reuse existing logic)
-numpy==1.26.4
+numpy==1.26.4  # Compatible with OCR dependencies
 pandas==2.2.3
 
 # Document processing
 pymupdf==1.24.14
 pillow==10.4.0
 docling==2.54.0
+
+# OCR dependencies for image processing
+easyocr==1.7.2
+opencv-python-headless==4.8.0.76
 
 # Text processing
 tiktoken==0.5.0

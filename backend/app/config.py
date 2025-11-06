@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     mistral_api_key: str = os.getenv("MISTRAL_API_KEY", "")
 
+    # Chat Model Configuration
+    openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+    mistral_chat_model: str = os.getenv("MISTRAL_CHAT_MODEL", "mistral-large-latest")
+    
+    # Embedding Model Configuration
+    openai_embedding_model: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
+    mistral_embedding_model: str = os.getenv("MISTRAL_EMBEDDING_MODEL", "mistral-embed")
+    
+    # Generation Parameters
+    openai_max_tokens: int = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
+    mistral_max_tokens: int = int(os.getenv("MISTRAL_MAX_TOKENS", "1000"))
+    openai_temperature: float = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+    mistral_temperature: float = float(os.getenv("MISTRAL_TEMPERATURE", "0.7"))
 
     # API Configuration
     api_host: str = os.getenv("API_HOST", "0.0.0.0")
@@ -30,9 +43,6 @@ class Settings(BaseSettings):
     max_upload_size: int = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))
     # Comprehensive list of file formats supported by Docling document processor
     allowed_extensions: List[str] = json.loads(os.getenv("ALLOWED_EXTENSIONS", '["pdf","docx","doc","xlsx","xls","pptx","ppt","odt","ods","odp","rtf","md","html","htm","txt","png","jpg","jpeg","tiff","bmp","gif","svg","csv","tsv","xml","json","epub"]'))
-
-    # OpenAI Configuration
-    openai_embedding_model: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 
     # Security Configuration
     file_validation_enabled: bool = os.getenv("FILE_VALIDATION_ENABLED", "false").lower() == "true"
@@ -66,5 +76,17 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "allow"  # Allow extra fields to prevent validation errors
+
+    @property
+    def max_tokens(self) -> int:
+        """Get max tokens based on current provider preference"""
+        # Default to OpenAI settings for now
+        return self.openai_max_tokens
+
+    @property
+    def temperature(self) -> float:
+        """Get temperature based on current provider preference"""
+        # Default to OpenAI settings for now
+        return self.openai_temperature
 
 settings = Settings()

@@ -33,9 +33,9 @@ async def chat_with_documents(
 ):
     """Chat with documents using embeddings and LLM"""
 
-    # Check if API keys are configured
-    openai_key = os.getenv("OPENAI_API_KEY")
-    mistral_key = os.getenv("MISTRAL_API_KEY")
+    # Check if API keys are configured using settings
+    openai_key = settings.openai_api_key
+    mistral_key = settings.mistral_api_key
 
     print(f"🔑 API Key Check - OpenAI: {'✅' if openai_key else '❌'}, Mistral: {'✅' if mistral_key else '❌'}")
 
@@ -46,14 +46,14 @@ async def chat_with_documents(
             detail="LLM API keys not configured. Please configure OpenAI or Mistral API keys."
         )
 
-    # Determine LLM provider
+    # Determine LLM provider and model using settings
     if openai_key:
         llm_provider = "openai"
-        model_name = "gpt-4o-mini"
+        model_name = settings.openai_chat_model
         print(f"🤖 Using OpenAI provider with model: {model_name}")
     elif mistral_key:
         llm_provider = "mistral"
-        model_name = "mistral-large-latest"
+        model_name = settings.mistral_chat_model
         print(f"🤖 Using Mistral provider with model: {model_name}")
     else:
         print("❌ No LLM provider available despite API key check")
@@ -432,9 +432,10 @@ async def get_embedding(text: str) -> Optional[List[float]]:
         if openai_key:
             from openai import AsyncOpenAI
             client = AsyncOpenAI(api_key=openai_key)
-            print(f"🤖 Getting async embedding from OpenAI for: {text[:50]}...")
+            embedding_model = settings.openai_embedding_model
+            print(f"🤖 Getting async embedding from OpenAI ({embedding_model}) for: {text[:50]}...")
             response = await client.embeddings.create(
-                model="text-embedding-3-large",  # Use same model as document processing
+                model=embedding_model,
                 input=text
             )
             embedding = response.data[0].embedding
@@ -448,14 +449,15 @@ async def get_embedding(text: str) -> Optional[List[float]]:
             # Mistral doesn't have official async support yet, use sync with asyncio
             from mistralai import Mistral
             client = Mistral(api_key=mistral_key)
-            print(f"🤖 Getting embedding from Mistral for: {text[:50]}...")
+            embedding_model = settings.mistral_embedding_model
+            print(f"🤖 Getting embedding from Mistral ({embedding_model}) for: {text[:50]}...")
             
             # Run sync Mistral call in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
                 lambda: client.embeddings.create(
-                    model="mistral-embed",
+                    model=embedding_model,
                     inputs=[text]
                 )
             )
@@ -518,23 +520,33 @@ async def generate_llm_response(
             {"role": "user", "content": message}
         ]
 
+        # Get configured temperature and max_tokens from settings
+        if provider == "openai":
+            temperature = settings.openai_temperature
+            max_tokens = settings.openai_max_tokens
+            api_key = settings.openai_api_key
+        elif provider == "mistral":
+            temperature = settings.mistral_temperature
+            max_tokens = settings.mistral_max_tokens
+            api_key = settings.mistral_api_key
+
         if provider == "openai":
             from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            print(f"🤖 Generating async LLM response with {model}...")
+            client = AsyncOpenAI(api_key=api_key)
+            print(f"🤖 Generating async LLM response with {model} (temp: {temperature}, max_tokens: {max_tokens})...")
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=0.7,
-                max_tokens=1000
+                temperature=temperature,
+                max_tokens=max_tokens
             )
             return response.choices[0].message.content
 
         elif provider == "mistral":
             # Mistral doesn't have official async support yet, use sync with asyncio
             from mistralai import Mistral
-            client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"))
-            print(f"🤖 Generating LLM response with {model}...")
+            client = Mistral(api_key=api_key)
+            print(f"🤖 Generating LLM response with {model} (temp: {temperature}, max_tokens: {max_tokens})...")
             
             # Run sync Mistral call in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -543,8 +555,8 @@ async def generate_llm_response(
                 lambda: client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    temperature=0.7,
-                    max_tokens=1000
+                    temperature=temperature,
+                    max_tokens=max_tokens
                 )
             )
             return response.choices[0].message.content
