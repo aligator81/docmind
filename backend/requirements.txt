@@ -57,7 +57,7 @@ mistralai==1.9.10
 
 # Pydantic for data validation
 pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic-settings==2.3.0
 
 # Background task processing (Redis and Celery removed - using synchronous processing)
 
