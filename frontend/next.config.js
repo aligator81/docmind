@@ -3,6 +3,7 @@ const nextConfig = {
   /* config options here */
   reactStrictMode: true,
   transpilePackages: ['antd', '@ant-design/icons'],
+  output: 'standalone',
   logging: {
     fetches: {
       fullUrl: true,
