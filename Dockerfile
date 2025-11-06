@@ -4,7 +4,8 @@ FROM node:20-alpine AS frontend-builder
 # Build frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+COPY frontend/package-lock.json ./
+RUN npm ci --production=false
 
 COPY frontend/ ./
 RUN npm run build
